@@ -1762,6 +1762,7 @@ app.add_middleware(
         "https://frontend-production-14d5.up.railway.app",
         "https://tinitiateai-image-generator.netlify.app",
         "http://tinitiateai-image-generator.netlify.app",
+        "https://main.d2o04ykswuwvua.amplifyapp.com",
     ],
     allow_credentials=True,
     allow_methods=["*"],
