@@ -1,0 +1,459 @@
+﻿=== UPLOAD AND URL HANDLERS ===
+
+
+    setReference({
+      type,
+
+      name:
+        file.name,
+
+      url:
+        objectUrl,
+
+      size:
+        file.size,
+
+      mimeType:
+        file.type,
+
+      source:
+        "upload",
+    });
+
+
+    setShowReferenceModal(
+      false,
+    );
+
+    setShowUrlInput(
+      false,
+    );
+
+    return null;
+  }
+
+
+  async function handleFileInputChange(
+    event: ChangeEvent<HTMLInputElement>,
+  ) {
+    const files = Array.from(event.target.files || []) as File[];
+
+    if (files.length === 0) {
+      event.target.value = "";
+      return;
+    }
+
+    try {
+      // Upload every selected image and keep all successful uploads selected.
+      // This preserves the existing single-upload flow while allowing the user
+      // to choose multiple reference images in one action.
+      let selectedIds = [...selectedInputIds];
+
+      for (const file of files) {
+        const uploadedId = await handleUploadedFile(
+          file,
+          selectedIds.length > 0,
+          selectedIds,
+        );
+
+        if (uploadedId && !selectedIds.includes(uploadedId)) {
+          selectedIds = [...selectedIds, uploadedId];
+          setSelectedInputIds(selectedIds);
+        }
+      }
+    } finally {
+      event.target.value = "";
+    }
+  }
+
+
+  /*
+   * ------------------------------------------------------------
+   * Drag and drop
+   * ------------------------------------------------------------
+   */
+
+  function handleDrop(
+    event: DragEvent<HTMLDivElement>,
+  ) {
+
+    event.preventDefault();
+
+
+    const file =
+      event.dataTransfer
+        .files?.[0];
+
+
+    if (file) {
+
+      void handleUploadedFile(
+        file,
+      );
+    }
+  }
+
+
+  /*
+   * ------------------------------------------------------------
+   * External URL
+   * ------------------------------------------------------------
+   */
+
+  function handleExternalUrl() {
+
+    const url =
+      externalUrl.trim();
+
+
+    if (!url) {
+
+      setUrlError(
+        "Please enter a URL.",
+      );
+
+      return;
+    }
+
+
+    try {
+
+      new URL(url);
+
+    } catch {
+
+      setUrlError(
+        "Please enter a valid URL.",
+      );
+
+      return;
+    }
+
+
+    setUrlError("");
+
+    setSelectedInputIds([]);
+
+    setTemplateResult(
+      null,
+    );
+
+    setError("");
+
+
+    let externalReference:
+      ReferenceData;
+
+
+    if (
+      isYouTubeUrl(
+        url,
+      )
+    ) {
+
+      externalReference = {
+
+        type:
+          "youtube",
+
+        name:
+          "YouTube Reference",
+
+        url,
+
+        source:
+          "external-url",
+
+        sourceId:
+          url,
+      };
+
+    } else if (
+      isImageUrl(
+        url,
+      )
+    ) {
+
+      externalReference = {
+
+        type:
+          "image-link",
+
+        name:
+          "External Image",
+
+        url,
+
+        source:
+          "external-url",
+
+        sourceId:
+          url,
+      };
+
+    } else {
+
+      externalReference = {
+
+        type:
+          "image-link",
+
+        name:
+          "External Reference",
+
+        url,
+
+        source:
+          "external-url",
+
+        sourceId:
+          url,
+      };
+    }
+
+
+    setReference(
+      externalReference,
+    );
+
+
+    // Template generation is temporarily disabled.
+
+
+    setExternalUrl(
+      "",
+    );
+
+    setShowUrlInput(
+      false,
+    );
+
+    setShowReferenceModal(
+      false,
+    );
+  }
+
+
+  /*
+   * ------------------------------------------------------------
+   * Automatic template generation
+   * ------------------------------------------------------------
+   */
+=== IMAGE GENERATION ===
+
+
+  /*
+   * ------------------------------------------------------------
+   * Generate output image
+   * ------------------------------------------------------------
+   */
+
+  async function handleGenerateImage() {
+    if (selectedInputIds.length === 0 && !reference) {
+      setError("Please select at least one reference image.");
+      return;
+    }
+
+    if (!templatePrompt.trim()) {
+      setError("Enter a content prompt before generating the output image.");
+      return;
+    }
+
+    if (reference && (reference.type === "pdf" || reference.type === "video" || reference.type === "youtube")) {
+      setError("Image generation currently requires image references.");
+      return;
+    }
+
+    setError("");
+    setPromptMode("manual");
+    setGeneratedImageUrl("");
+    setGeneratedImageFilename("");
+    setGeneratedImageModel("");
+    setGeneratedImageProvider("");
+    setGeneratedImageSaved(false);
+    setGeneratedImageSaveMessage("");
+    setIsOutputFolderPickerOpen(false);
+    setGeneratedTextChanges({});
+    setIsGeneratingImage(true);
+
+    try {
+      if (selectedApiKeys.length === 0) {
+        throw new Error(
+          "No API key is selected. Select at least one API key before generating an image.",
+        );
+      }
+
+      const apiStatusResponse = await fetch(
+        `${API_BASE_URL}/api/api-keys/status`,
+        { credentials: "include" },
+      );
+      const apiStatus = await apiStatusResponse.json().catch(() => null);
+
+      if (!apiStatusResponse.ok || !apiStatus?.configured) {
+        throw new Error(
+          String(
+            apiStatus?.detail ||
+              "The API key configuration is no longer available. Please return to API Setup and upload the API key file again.",
+          ),
+        );
+      }
+
+      // The current UI selection is always authoritative. Do not use a cached
+      // pipeline key from a previous generation.
+      const selectionResponse = await fetch(
+        `${API_BASE_URL}/api/api-keys/select`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ selected_ids: selectedApiKeys }),
+          credentials: "include",
+        },
+      );
+      const selectionData = await selectionResponse.json().catch(() => null);
+      if (!selectionResponse.ok) {
+        throw new Error(
+          String(selectionData?.detail || "Unable to synchronize the selected API keys."),
+        );
+      }
+
+      const selectedNames = Array.isArray(selectionData?.selected)
+        ? selectionData.selected
+        : [];
+      if (selectedNames.length === 0) {
+        throw new Error(
+          "None of the selected API keys are available on the backend.",
+        );
+      }
+
+      // Build the reference list from the actual selected reference IDs.
+      // External URL/manual reference remains supported when no Drive/input
+      // item is selected. Google Drive IDs are sent as IDs, never preview URLs.
+      const selectedReferences = selectedInputIds
+        .map((id) => {
+          const file = inputFiles.find((item) => item.id === id);
+          if (!file) return null;
+
+          const sourceType =
+            file.source === "google-drive"
+              ? "google-drive"
+              : file.source === "manual-upload"
+                ? "upload"
+                : "input-folder";
+
+          return {
+            number:
+              getDriveReferenceNumber(file) ??
+              selectedInputIds.indexOf(id) + 1,
+            source_type: sourceType,
+            source:
+              file.source === "google-drive"
+                ? file.id.replace(/^drive:/i, "")
+                : file.name,
+            filename: file.name,
+            content_type: file.mimeType || "",
+          };
+        })
+        .filter(Boolean);
+
+      if (selectedReferences.length === 0 && reference) {
+        const sourceType =
+          reference.source === "google-drive"
+            ? "google-drive"
+            : reference.source === "upload"
+              ? "upload"
+              : reference.source === "input-folder"
+                ? "input-folder"
+                : "external-url";
+
+        const source = reference.sourceId || reference.url;
+        if (!source || source.startsWith("blob:")) {
+          throw new Error(
+            "The selected reference is not available to the backend.",
+          );
+        }
+
+        selectedReferences.push({
+          number: 1,
+          source_type: sourceType,
+          source,
+          filename: reference.name || "reference.png",
+          content_type: reference.mimeType || "",
+        });
+      }
+
+      if (selectedReferences.length === 0) {
+        throw new Error("At least one reference image is required.");
+      }
+
+      if (selectedReferences.length > 16) {
+        throw new Error("A maximum of 16 reference images can be selected.");
+      }
+
+      const firstReference = selectedReferences[0];
+      if (!firstReference) {
+        throw new Error("At least one reference image is required.");
+      }
+      const formData = new FormData();
+      formData.append("source_type", firstReference.source_type);
+      formData.append("source", firstReference.source);
+      formData.append("filename", firstReference.filename);
+      formData.append("content_type", firstReference.content_type);
+      formData.append("references_json", JSON.stringify(selectedReferences));
+      formData.append("prompt", templatePrompt.trim());
+      formData.append("template_json", "{}");
+
+      const response = await fetch(
+        `${API_BASE_URL}/api/images/generate`,
+        {
+          method: "POST",
+          body: formData,
+          credentials: "include",
+        },
+      );
+
+      const data = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        throw new Error(
+          String(data?.detail || "Unable to generate the output image."),
+        );
+      }
+
+      if (!data?.image_url) {
+=== REFERENCE STATE ===
+
+  frontend\src\App.tsx:67:
+  frontend\src\App.tsx:68:interface DriveOutputFolder { id: string; name: string; label?: string; }
+  frontend\src\App.tsx:69:
+> frontend\src\App.tsx:70:interface ReferenceData {
+  frontend\src\App.tsx:71:  type: ReferenceType;
+  frontend\src\App.tsx:72:  name: string;
+  frontend\src\App.tsx:73:  url: string;
+  frontend\src\App.tsx:74:  size?: number;
+  frontend\src\App.tsx:75:  mimeType?: string;
+  frontend\src\App.tsx:76:  source?:
+  frontend\src\App.tsx:77:    | "input-folder"
+  frontend\src\App.tsx:78:    | "external-url"
+  frontend\src\App.tsx:1493:}: ImageGeneratorProps) {
+  frontend\src\App.tsx:1494:
+  frontend\src\App.tsx:1495:
+> frontend\src\App.tsx:1496:  const [inputFiles, setInputFiles] =
+  frontend\src\App.tsx:1497:    useState<InputFile[]>([]);
+  frontend\src\App.tsx:1498:
+> frontend\src\App.tsx:1499:  const [selectedInputIds, setSelectedInputIds] =
+  frontend\src\App.tsx:1500:    useState<string[]>([]);
+  frontend\src\App.tsx:1501:
+  frontend\src\App.tsx:1502:  // Keep the first selected reference for the existing preview area.
+  frontend\src\App.tsx:1503:  const selectedInputId = selectedInputIds[0] || "";
+  frontend\src\App.tsx:1504:
+> frontend\src\App.tsx:1505:  const [reference, setReference] =
+  frontend\src\App.tsx:1506:    useState<ReferenceData | null>(null);
+  frontend\src\App.tsx:1507:
+  frontend\src\App.tsx:1508:  const [showReferenceModal, setShowReferenceModal] =
+  frontend\src\App.tsx:1509:    useState(false);
+  frontend\src\App.tsx:1510:
+  frontend\src\App.tsx:1511:  const [showUrlInput, setShowUrlInput] =
+  frontend\src\App.tsx:1512:    useState(false);
+  frontend\src\App.tsx:1513:
+
+

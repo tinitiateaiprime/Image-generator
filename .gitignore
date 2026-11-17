@@ -1,0 +1,50 @@
+# Node dependencies
+node_modules/
+dist/
+/dist
+.env
+
+# Python Virtual Environments
+.venv/
+.venv-sd/
+backend/.venv-sd/
+venv/
+ENV/
+
+# Python caching
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Application & Test Outputs
+*.png
+output/
+backend/output/
+backend/sd15_test_output.png
+
+# Sensitive Secrets, Tokens, and Credentials
+*.json
+.canva_connect_tokens.json
+backend/.canva_connect_tokens.json
+backend/app/.canva_connect_tokens.json
+drive_config.json
+backend/drive_config.json
+service-account.json
+backend/service-account.json
+
+# IDEs and System files
+.vscode/
+.idea/
+.netlify/
+Thumbs.db
+.DS_Store
+backend/uploads/
+
+# Google Drive authentication
+backend/token.pickle
+backend/token.json
+backend/credentials.json
+backend/service-account.json
+frontend/.env
+backend/.env
